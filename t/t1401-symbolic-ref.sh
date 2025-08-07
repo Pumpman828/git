@@ -2,7 +2,6 @@
 
 test_description='basic symbolic-ref tests'
 
-TEST_PASSES_SANITIZE_LEAK=true
 . ./test-lib.sh
 
 # If the tests munging HEAD fail, they can break detection of
@@ -16,7 +15,7 @@ reset_to_sane() {
 test_expect_success 'setup' '
 	git symbolic-ref HEAD refs/heads/foo &&
 	test_commit file &&
-	"$TAR" cf .git.tar .git/
+	"$TAR" cf .git.tar .git
 '
 
 test_expect_success 'symbolic-ref read/write roundtrip' '

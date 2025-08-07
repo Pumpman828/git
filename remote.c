@@ -24,6 +24,7 @@
 #include "advice.h"
 #include "connect.h"
 #include "parse-options.h"
+#include "transport.h"
 
 enum map_direction { FROM_SRC, FROM_DST };
 
@@ -143,6 +144,7 @@ static struct remote *make_remote(struct remote_state *remote_state,
 	ret->name = xstrndup(name, len);
 	refspec_init(&ret->push, REFSPEC_PUSH);
 	refspec_init(&ret->fetch, REFSPEC_FETCH);
+	string_list_init_dup(&ret->server_options);
 
 	ALLOC_GROW(remote_state->remotes, remote_state->remotes_nr + 1,
 		   remote_state->remotes_alloc);
@@ -166,6 +168,7 @@ static void remote_clear(struct remote *remote)
 	free((char *)remote->uploadpack);
 	FREE_AND_NULL(remote->http_proxy);
 	FREE_AND_NULL(remote->http_proxy_authmethod);
+	string_list_clear(&remote->server_options, 0);
 }
 
 static void add_merge(struct branch *branch, const char *name)
@@ -508,6 +511,9 @@ static int handle_config(const char *key, const char *value,
 	} else if (!strcmp(subkey, "vcs")) {
 		FREE_AND_NULL(remote->foreign_vcs);
 		return git_config_string(&remote->foreign_vcs, key, value);
+	} else if (!strcmp(subkey, "serveroption")) {
+		return parse_transport_option(key, value,
+					      &remote->server_options);
 	}
 	return 0;
 }
@@ -868,6 +874,20 @@ struct strvec *push_url_of_remote(struct remote *remote)
 	return remote->pushurl.nr ? &remote->pushurl : &remote->url;
 }
 
+void ref_push_report_free(struct ref_push_report *report)
+{
+	while (report) {
+		struct ref_push_report *next = report->next;
+
+		free(report->ref_name);
+		free(report->old_oid);
+		free(report->new_oid);
+		free(report);
+
+		report = next;
+	}
+}
+
 static int match_name_with_pattern(const char *key, const char *name,
 				   const char *value, char **result)
 {
@@ -1122,6 +1142,7 @@ void free_one_ref(struct ref *ref)
 	if (!ref)
 		return;
 	free_one_ref(ref->peer_ref);
+	ref_push_report_free(ref->report);
 	free(ref->remote_status);
 	free(ref->tracking_ref);
 	free(ref->symref);

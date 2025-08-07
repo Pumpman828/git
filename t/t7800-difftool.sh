@@ -11,7 +11,6 @@ Testing basic diff tool invocation
 GIT_TEST_DEFAULT_INITIAL_BRANCH_NAME=main
 export GIT_TEST_DEFAULT_INITIAL_BRANCH_NAME
 
-TEST_PASSES_SANITIZE_LEAK=true
 . ./test-lib.sh
 
 difftool_test_setup ()
@@ -664,6 +663,10 @@ run_dir_diff_test 'difftool --dir-diff syncs worktree without unstaged change' '
 	git difftool -d $symlinks --extcmd "$PWD/modify-right-file" branch &&
 	echo "new content" >expect &&
 	test_cmp expect file
+'
+
+run_dir_diff_test 'difftool --dir-diff with no diff' '
+	git difftool -d main main
 '
 
 write_script modify-file <<\EOF

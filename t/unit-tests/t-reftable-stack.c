@@ -8,15 +8,18 @@ https://developers.google.com/open-source/licenses/bsd
 
 #include "test-lib.h"
 #include "lib-reftable.h"
+#include "dir.h"
 #include "reftable/merged.h"
 #include "reftable/reader.h"
 #include "reftable/reftable-error.h"
 #include "reftable/stack.h"
+#include "strbuf.h"
+#include "tempfile.h"
 #include <dirent.h>
 
 static void clear_dir(const char *dirname)
 {
-	struct strbuf path = STRBUF_INIT;
+	struct strbuf path = REFTABLE_BUF_INIT;
 	strbuf_addstr(&path, dirname);
 	remove_dir_recursively(&path, 0);
 	strbuf_release(&path);
@@ -105,7 +108,6 @@ static int write_test_ref(struct reftable_writer *wr, void *arg)
 static void write_n_ref_tables(struct reftable_stack *st,
 			       size_t n)
 {
-	struct strbuf buf = STRBUF_INIT;
 	int disable_auto_compact;
 	int err;
 
@@ -117,18 +119,17 @@ static void write_n_ref_tables(struct reftable_stack *st,
 			.update_index = reftable_stack_next_update_index(st),
 			.value_type = REFTABLE_REF_VAL1,
 		};
+		char buf[128];
 
-		strbuf_reset(&buf);
-		strbuf_addf(&buf, "refs/heads/branch-%04"PRIuMAX, (uintmax_t)i);
-		ref.refname = buf.buf;
-		t_reftable_set_hash(ref.value.val1, i, GIT_SHA1_FORMAT_ID);
+		snprintf(buf, sizeof(buf), "refs/heads/branch-%04"PRIuMAX, (uintmax_t)i);
+		ref.refname = buf;
+		t_reftable_set_hash(ref.value.val1, i, REFTABLE_HASH_SHA1);
 
 		err = reftable_stack_add(st, &write_test_ref, &ref);
 		check(!err);
 	}
 
 	st->opts.disable_auto_compact = disable_auto_compact;
-	strbuf_release(&buf);
 }
 
 struct write_log_arg {
@@ -147,7 +148,7 @@ static int write_test_log(struct reftable_writer *wr, void *arg)
 static void t_reftable_stack_add_one(void)
 {
 	char *dir = get_tmp_dir(__LINE__);
-	struct strbuf scratch = STRBUF_INIT;
+	struct reftable_buf scratch = REFTABLE_BUF_INIT;
 	int mask = umask(002);
 	struct reftable_write_options opts = {
 		.default_permissions = 0660,
@@ -170,21 +171,21 @@ static void t_reftable_stack_add_one(void)
 
 	err = reftable_stack_read_ref(st, ref.refname, &dest);
 	check(!err);
-	check(reftable_ref_record_equal(&ref, &dest, GIT_SHA1_RAWSZ));
+	check(reftable_ref_record_equal(&ref, &dest, REFTABLE_HASH_SIZE_SHA1));
 	check_int(st->readers_len, >, 0);
 
 #ifndef GIT_WINDOWS_NATIVE
-	strbuf_addstr(&scratch, dir);
-	strbuf_addstr(&scratch, "/tables.list");
+	check(!reftable_buf_addstr(&scratch, dir));
+	check(!reftable_buf_addstr(&scratch, "/tables.list"));
 	err = stat(scratch.buf, &stat_result);
 	check(!err);
 	check_int((stat_result.st_mode & 0777), ==, opts.default_permissions);
 
-	strbuf_reset(&scratch);
-	strbuf_addstr(&scratch, dir);
-	strbuf_addstr(&scratch, "/");
+	reftable_buf_reset(&scratch);
+	check(!reftable_buf_addstr(&scratch, dir));
+	check(!reftable_buf_addstr(&scratch, "/"));
 	/* do not try at home; not an external API for reftable. */
-	strbuf_addstr(&scratch, st->readers[0]->name);
+	check(!reftable_buf_addstr(&scratch, st->readers[0]->name));
 	err = stat(scratch.buf, &stat_result);
 	check(!err);
 	check_int((stat_result.st_mode & 0777), ==, opts.default_permissions);
@@ -194,7 +195,7 @@ static void t_reftable_stack_add_one(void)
 
 	reftable_ref_record_release(&dest);
 	reftable_stack_destroy(st);
-	strbuf_release(&scratch);
+	reftable_buf_release(&scratch);
 	clear_dir(dir);
 	umask(mask);
 }
@@ -281,7 +282,7 @@ static void t_reftable_stack_transaction_api(void)
 	err = reftable_stack_read_ref(st, ref.refname, &dest);
 	check(!err);
 	check_int(REFTABLE_REF_SYMREF, ==, dest.value_type);
-	check(reftable_ref_record_equal(&ref, &dest, GIT_SHA1_RAWSZ));
+	check(reftable_ref_record_equal(&ref, &dest, REFTABLE_HASH_SIZE_SHA1));
 
 	reftable_ref_record_release(&dest);
 	reftable_stack_destroy(st);
@@ -341,7 +342,7 @@ static void t_reftable_stack_transaction_with_reload(void)
 	for (size_t i = 0; i < ARRAY_SIZE(refs); i++) {
 		err = reftable_stack_read_ref(st2, refs[i].refname, &ref);
 		check(!err);
-		check(reftable_ref_record_equal(&refs[i], &ref, GIT_SHA1_RAWSZ));
+		check(reftable_ref_record_equal(&refs[i], &ref, REFTABLE_HASH_SIZE_SHA1));
 	}
 
 	reftable_ref_record_release(&ref);
@@ -416,7 +417,7 @@ static void t_reftable_stack_auto_compaction_fails_gracefully(void)
 	};
 	struct reftable_write_options opts = { 0 };
 	struct reftable_stack *st;
-	struct strbuf table_path = STRBUF_INIT;
+	struct reftable_buf table_path = REFTABLE_BUF_INIT;
 	char *dir = get_tmp_dir(__LINE__);
 	int err;
 
@@ -434,7 +435,10 @@ static void t_reftable_stack_auto_compaction_fails_gracefully(void)
 	 * Adding a new table to the stack should not be impacted by this, even
 	 * though auto-compaction will now fail.
 	 */
-	strbuf_addf(&table_path, "%s/%s.lock", dir, st->readers[0]->name);
+	check(!reftable_buf_addstr(&table_path, dir));
+	check(!reftable_buf_addstr(&table_path, "/"));
+	check(!reftable_buf_addstr(&table_path, st->readers[0]->name));
+	check(!reftable_buf_addstr(&table_path, ".lock"));
 	write_file_buf(table_path.buf, "", 0);
 
 	ref.update_index = 2;
@@ -445,7 +449,7 @@ static void t_reftable_stack_auto_compaction_fails_gracefully(void)
 	check_int(st->stats.failures, ==, 1);
 
 	reftable_stack_destroy(st);
-	strbuf_release(&table_path);
+	reftable_buf_release(&table_path);
 	clear_dir(dir);
 }
 
@@ -515,7 +519,7 @@ static void t_reftable_stack_add(void)
 	char *dir = get_tmp_dir(__LINE__);
 	struct reftable_ref_record refs[2] = { 0 };
 	struct reftable_log_record logs[2] = { 0 };
-	struct strbuf path = STRBUF_INIT;
+	struct reftable_buf path = REFTABLE_BUF_INIT;
 	struct stat stat_result;
 	size_t i, N = ARRAY_SIZE(refs);
 
@@ -528,13 +532,13 @@ static void t_reftable_stack_add(void)
 		refs[i].refname = xstrdup(buf);
 		refs[i].update_index = i + 1;
 		refs[i].value_type = REFTABLE_REF_VAL1;
-		t_reftable_set_hash(refs[i].value.val1, i, GIT_SHA1_FORMAT_ID);
+		t_reftable_set_hash(refs[i].value.val1, i, REFTABLE_HASH_SHA1);
 
 		logs[i].refname = xstrdup(buf);
 		logs[i].update_index = N + i + 1;
 		logs[i].value_type = REFTABLE_LOG_UPDATE;
 		logs[i].value.update.email = xstrdup("identity@invalid");
-		t_reftable_set_hash(logs[i].value.update.new_hash, i, GIT_SHA1_FORMAT_ID);
+		t_reftable_set_hash(logs[i].value.update.new_hash, i, REFTABLE_HASH_SHA1);
 	}
 
 	for (i = 0; i < N; i++) {
@@ -560,7 +564,7 @@ static void t_reftable_stack_add(void)
 		int err = reftable_stack_read_ref(st, refs[i].refname, &dest);
 		check(!err);
 		check(reftable_ref_record_equal(&dest, refs + i,
-						 GIT_SHA1_RAWSZ));
+						 REFTABLE_HASH_SIZE_SHA1));
 		reftable_ref_record_release(&dest);
 	}
 
@@ -569,22 +573,22 @@ static void t_reftable_stack_add(void)
 		int err = reftable_stack_read_log(st, refs[i].refname, &dest);
 		check(!err);
 		check(reftable_log_record_equal(&dest, logs + i,
-						 GIT_SHA1_RAWSZ));
+						 REFTABLE_HASH_SIZE_SHA1));
 		reftable_log_record_release(&dest);
 	}
 
 #ifndef GIT_WINDOWS_NATIVE
-	strbuf_addstr(&path, dir);
-	strbuf_addstr(&path, "/tables.list");
+	check(!reftable_buf_addstr(&path, dir));
+	check(!reftable_buf_addstr(&path, "/tables.list"));
 	err = stat(path.buf, &stat_result);
 	check(!err);
 	check_int((stat_result.st_mode & 0777), ==, opts.default_permissions);
 
-	strbuf_reset(&path);
-	strbuf_addstr(&path, dir);
-	strbuf_addstr(&path, "/");
+	reftable_buf_reset(&path);
+	check(!reftable_buf_addstr(&path, dir));
+	check(!reftable_buf_addstr(&path, "/"));
 	/* do not try at home; not an external API for reftable. */
-	strbuf_addstr(&path, st->readers[0]->name);
+	check(!reftable_buf_addstr(&path, st->readers[0]->name));
 	err = stat(path.buf, &stat_result);
 	check(!err);
 	check_int((stat_result.st_mode & 0777), ==, opts.default_permissions);
@@ -598,7 +602,7 @@ static void t_reftable_stack_add(void)
 		reftable_ref_record_release(&refs[i]);
 		reftable_log_record_release(&logs[i]);
 	}
-	strbuf_release(&path);
+	reftable_buf_release(&path);
 	clear_dir(dir);
 }
 
@@ -620,14 +624,14 @@ static void t_reftable_stack_iterator(void)
 		refs[i].refname = xstrfmt("branch%02"PRIuMAX, (uintmax_t)i);
 		refs[i].update_index = i + 1;
 		refs[i].value_type = REFTABLE_REF_VAL1;
-		t_reftable_set_hash(refs[i].value.val1, i, GIT_SHA1_FORMAT_ID);
+		t_reftable_set_hash(refs[i].value.val1, i, REFTABLE_HASH_SHA1);
 
 		logs[i].refname = xstrfmt("branch%02"PRIuMAX, (uintmax_t)i);
 		logs[i].update_index = i + 1;
 		logs[i].value_type = REFTABLE_LOG_UPDATE;
 		logs[i].value.update.email = xstrdup("johndoe@invalid");
 		logs[i].value.update.message = xstrdup("commit\n");
-		t_reftable_set_hash(logs[i].value.update.new_hash, i, GIT_SHA1_FORMAT_ID);
+		t_reftable_set_hash(logs[i].value.update.new_hash, i, REFTABLE_HASH_SHA1);
 	}
 
 	for (i = 0; i < N; i++) {
@@ -654,14 +658,16 @@ static void t_reftable_stack_iterator(void)
 		if (err > 0)
 			break;
 		check(!err);
-		check(reftable_ref_record_equal(&ref, &refs[i], GIT_SHA1_RAWSZ));
+		check(reftable_ref_record_equal(&ref, &refs[i], REFTABLE_HASH_SIZE_SHA1));
 		reftable_ref_record_release(&ref);
 	}
 	check_int(i, ==, N);
 
 	reftable_iterator_destroy(&it);
 
-	reftable_stack_init_log_iterator(st, &it);
+	err = reftable_stack_init_log_iterator(st, &it);
+	check(!err);
+
 	reftable_iterator_seek_log(&it, logs[0].refname);
 	for (i = 0; ; i++) {
 		struct reftable_log_record log = { 0 };
@@ -670,7 +676,7 @@ static void t_reftable_stack_iterator(void)
 		if (err > 0)
 			break;
 		check(!err);
-		check(reftable_log_record_equal(&log, &logs[i], GIT_SHA1_RAWSZ));
+		check(reftable_log_record_equal(&log, &logs[i], REFTABLE_HASH_SIZE_SHA1));
 		reftable_log_record_release(&log);
 	}
 	check_int(i, ==, N);
@@ -763,7 +769,7 @@ static void t_reftable_stack_tombstone(void)
 		if (i % 2 == 0) {
 			refs[i].value_type = REFTABLE_REF_VAL1;
 			t_reftable_set_hash(refs[i].value.val1, i,
-					    GIT_SHA1_FORMAT_ID);
+					    REFTABLE_HASH_SHA1);
 		}
 
 		logs[i].refname = xstrdup(buf);
@@ -772,7 +778,7 @@ static void t_reftable_stack_tombstone(void)
 		if (i % 2 == 0) {
 			logs[i].value_type = REFTABLE_LOG_UPDATE;
 			t_reftable_set_hash(logs[i].value.update.new_hash, i,
-					    GIT_SHA1_FORMAT_ID);
+					    REFTABLE_HASH_SHA1);
 			logs[i].value.update.email =
 				xstrdup("identity@invalid");
 		}
@@ -832,7 +838,7 @@ static void t_reftable_stack_hash_id(void)
 		.value.symref = (char *) "target",
 		.update_index = 1,
 	};
-	struct reftable_write_options opts32 = { .hash_id = GIT_SHA256_FORMAT_ID };
+	struct reftable_write_options opts32 = { .hash_id = REFTABLE_HASH_SHA256 };
 	struct reftable_stack *st32 = NULL;
 	struct reftable_write_options opts_default = { 0 };
 	struct reftable_stack *st_default = NULL;
@@ -855,7 +861,7 @@ static void t_reftable_stack_hash_id(void)
 	err = reftable_stack_read_ref(st_default, "master", &dest);
 	check(!err);
 
-	check(reftable_ref_record_equal(&ref, &dest, GIT_SHA1_RAWSZ));
+	check(reftable_ref_record_equal(&ref, &dest, REFTABLE_HASH_SIZE_SHA1));
 	reftable_ref_record_release(&dest);
 	reftable_stack_destroy(st);
 	reftable_stack_destroy(st_default);
@@ -905,7 +911,7 @@ static void t_reflog_expire(void)
 		logs[i].value.update.time = i;
 		logs[i].value.update.email = xstrdup("identity@invalid");
 		t_reftable_set_hash(logs[i].value.update.new_hash, i,
-				    GIT_SHA1_FORMAT_ID);
+				    REFTABLE_HASH_SHA1);
 	}
 
 	for (i = 1; i <= N; i++) {
@@ -1060,7 +1066,7 @@ static void t_reftable_stack_auto_compaction_with_locked_tables(void)
 		.disable_auto_compact = 1,
 	};
 	struct reftable_stack *st = NULL;
-	struct strbuf buf = STRBUF_INIT;
+	struct reftable_buf buf = REFTABLE_BUF_INIT;
 	char *dir = get_tmp_dir(__LINE__);
 	int err;
 
@@ -1075,8 +1081,10 @@ static void t_reftable_stack_auto_compaction_with_locked_tables(void)
 	 * size, we expect that auto-compaction will want to compact all of the
 	 * tables. Locking any of the tables will keep it from doing so.
 	 */
-	strbuf_reset(&buf);
-	strbuf_addf(&buf, "%s/%s.lock", dir, st->readers[2]->name);
+	check(!reftable_buf_addstr(&buf, dir));
+	check(!reftable_buf_addstr(&buf, "/"));
+	check(!reftable_buf_addstr(&buf, st->readers[2]->name));
+	check(!reftable_buf_addstr(&buf, ".lock"));
 	write_file_buf(buf.buf, "", 0);
 
 	/*
@@ -1091,7 +1099,7 @@ static void t_reftable_stack_auto_compaction_with_locked_tables(void)
 	check_int(st->merged->readers_len, ==, 4);
 
 	reftable_stack_destroy(st);
-	strbuf_release(&buf);
+	reftable_buf_release(&buf);
 	clear_dir(dir);
 }
 
@@ -1099,7 +1107,6 @@ static void t_reftable_stack_add_performs_auto_compaction(void)
 {
 	struct reftable_write_options opts = { 0 };
 	struct reftable_stack *st = NULL;
-	struct strbuf refname = STRBUF_INIT;
 	char *dir = get_tmp_dir(__LINE__);
 	int err;
 	size_t i, n = 20;
@@ -1113,6 +1120,7 @@ static void t_reftable_stack_add_performs_auto_compaction(void)
 			.value_type = REFTABLE_REF_SYMREF,
 			.value.symref = (char *) "master",
 		};
+		char buf[128];
 
 		/*
 		 * Disable auto-compaction for all but the last runs. Like this
@@ -1121,9 +1129,8 @@ static void t_reftable_stack_add_performs_auto_compaction(void)
 		 */
 		st->opts.disable_auto_compact = i != n;
 
-		strbuf_reset(&refname);
-		strbuf_addf(&refname, "branch-%04"PRIuMAX, (uintmax_t)i);
-		ref.refname = refname.buf;
+		snprintf(buf, sizeof(buf), "branch-%04"PRIuMAX, (uintmax_t)i);
+		ref.refname = buf;
 
 		err = reftable_stack_add(st, write_test_ref, &ref);
 		check(!err);
@@ -1140,7 +1147,6 @@ static void t_reftable_stack_add_performs_auto_compaction(void)
 	}
 
 	reftable_stack_destroy(st);
-	strbuf_release(&refname);
 	clear_dir(dir);
 }
 
@@ -1150,7 +1156,7 @@ static void t_reftable_stack_compaction_with_locked_tables(void)
 		.disable_auto_compact = 1,
 	};
 	struct reftable_stack *st = NULL;
-	struct strbuf buf = STRBUF_INIT;
+	struct reftable_buf buf = REFTABLE_BUF_INIT;
 	char *dir = get_tmp_dir(__LINE__);
 	int err;
 
@@ -1161,8 +1167,10 @@ static void t_reftable_stack_compaction_with_locked_tables(void)
 	check_int(st->merged->readers_len, ==, 3);
 
 	/* Lock one of the tables that we're about to compact. */
-	strbuf_reset(&buf);
-	strbuf_addf(&buf, "%s/%s.lock", dir, st->readers[1]->name);
+	check(!reftable_buf_addstr(&buf, dir));
+	check(!reftable_buf_addstr(&buf, "/"));
+	check(!reftable_buf_addstr(&buf, st->readers[1]->name));
+	check(!reftable_buf_addstr(&buf, ".lock"));
 	write_file_buf(buf.buf, "", 0);
 
 	/*
@@ -1175,7 +1183,7 @@ static void t_reftable_stack_compaction_with_locked_tables(void)
 	check_int(st->merged->readers_len, ==, 3);
 
 	reftable_stack_destroy(st);
-	strbuf_release(&buf);
+	reftable_buf_release(&buf);
 	clear_dir(dir);
 }
 
@@ -1209,7 +1217,7 @@ static void unclean_stack_close(struct reftable_stack *st)
 	for (size_t i = 0; i < st->readers_len; i++)
 		reftable_reader_decref(st->readers[i]);
 	st->readers_len = 0;
-	FREE_AND_NULL(st->readers);
+	REFTABLE_FREE_AND_NULL(st->readers);
 }
 
 static void t_reftable_stack_compaction_concurrent_clean(void)
@@ -1301,7 +1309,7 @@ static void t_reftable_stack_reload_with_missing_table(void)
 	struct reftable_stack *st = NULL;
 	struct reftable_ref_record rec = { 0 };
 	struct reftable_iterator it = { 0 };
-	struct strbuf table_path = STRBUF_INIT, content = STRBUF_INIT;
+	struct reftable_buf table_path = REFTABLE_BUF_INIT, content = REFTABLE_BUF_INIT;
 	char *dir = get_tmp_dir(__LINE__);
 	int err;
 
@@ -1319,10 +1327,13 @@ static void t_reftable_stack_reload_with_missing_table(void)
 	 * our old readers. This should trigger a partial reload of the stack,
 	 * where we try to reuse our old readers.
 	*/
-	strbuf_addf(&content, "%s\n", st->readers[0]->name);
-	strbuf_addf(&content, "%s\n", st->readers[1]->name);
-	strbuf_addstr(&content, "garbage\n");
-	strbuf_addf(&table_path, "%s.lock", st->list_file);
+	check(!reftable_buf_addstr(&content, st->readers[0]->name));
+	check(!reftable_buf_addstr(&content, "\n"));
+	check(!reftable_buf_addstr(&content, st->readers[1]->name));
+	check(!reftable_buf_addstr(&content, "\n"));
+	check(!reftable_buf_addstr(&content, "garbage\n"));
+	check(!reftable_buf_addstr(&table_path, st->list_file));
+	check(!reftable_buf_addstr(&table_path, ".lock"));
 	write_file_buf(table_path.buf, content.buf, content.len);
 	err = rename(table_path.buf, st->list_file);
 	check(!err);
@@ -1347,8 +1358,8 @@ static void t_reftable_stack_reload_with_missing_table(void)
 	reftable_ref_record_release(&rec);
 	reftable_iterator_destroy(&it);
 	reftable_stack_destroy(st);
-	strbuf_release(&table_path);
-	strbuf_release(&content);
+	reftable_buf_release(&table_path);
+	reftable_buf_release(&content);
 	clear_dir(dir);
 }
 

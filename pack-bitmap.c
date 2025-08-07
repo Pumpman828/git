@@ -935,7 +935,7 @@ static inline int bitmap_position_packfile(struct bitmap_index *bitmap_git,
 					   const struct object_id *oid)
 {
 	uint32_t pos;
-	off_t offset = find_pack_entry_one(oid->hash, bitmap_git->pack);
+	off_t offset = find_pack_entry_one(oid, bitmap_git->pack);
 	if (!offset)
 		return -1;
 
@@ -1270,7 +1270,7 @@ static struct bitmap *find_boundary_objects(struct bitmap_index *bitmap_git,
 
 	tmp_blobs = revs->blob_objects;
 	tmp_trees = revs->tree_objects;
-	tmp_tags = revs->blob_objects;
+	tmp_tags = revs->tag_objects;
 	revs->blob_objects = 0;
 	revs->tree_objects = 0;
 	revs->tag_objects = 0;
@@ -1390,8 +1390,8 @@ static struct bitmap *find_objects(struct bitmap_index *bitmap_git,
 		}
 
 		base = bitmap_new();
-		if (!cascade_pseudo_merges_1(bitmap_git, base, roots_bitmap))
-			bitmap_free(roots_bitmap);
+		cascade_pseudo_merges_1(bitmap_git, base, roots_bitmap);
+		bitmap_free(roots_bitmap);
 	}
 
 	/*
@@ -1609,7 +1609,7 @@ static int in_bitmapped_pack(struct bitmap_index *bitmap_git,
 			if (bsearch_midx(&object->oid, bitmap_git->midx, NULL))
 				return 1;
 		} else {
-			if (find_pack_entry_one(object->oid.hash, bitmap_git->pack) > 0)
+			if (find_pack_entry_one(&object->oid, bitmap_git->pack) > 0)
 				return 1;
 		}
 	}

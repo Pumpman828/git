@@ -2,7 +2,6 @@
 
 test_description='pack-objects multi-pack reuse'
 
-TEST_PASSES_SANITIZE_LEAK=true
 . ./test-lib.sh
 . "$TEST_DIRECTORY"/lib-bitmap.sh
 
@@ -256,6 +255,28 @@ test_expect_success 'duplicate objects' '
 		packs_nr="$(find $packdir -type f -name "pack-*.pack" | wc -l)" &&
 
 		test_pack_objects_reused_all $objects_nr $packs_nr
+	)
+'
+
+test_expect_success 'duplicate objects with verbatim reuse' '
+	git init duplicate-objects-verbatim &&
+	(
+		cd duplicate-objects-verbatim &&
+
+		git config pack.allowPackReuse multi &&
+
+		test_commit_bulk 64 &&
+
+		# take the first object from the main pack...
+		git show-index <$(ls $packdir/pack-*.idx) >obj.raw &&
+		sort -nk1 <obj.raw | head -n1 | cut -d" " -f2 >in &&
+
+		# ...and create a separate pack containing just that object
+		p="$(git pack-objects $packdir/pack <in)" &&
+
+		git multi-pack-index write --bitmap --preferred-pack=pack-$p.idx &&
+
+		test_pack_objects_reused_all 192 2
 	)
 '
 

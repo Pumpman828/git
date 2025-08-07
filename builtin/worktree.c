@@ -231,7 +231,8 @@ static void prune_worktrees(void)
 	strbuf_release(&reason);
 }
 
-static int prune(int ac, const char **av, const char *prefix)
+static int prune(int ac, const char **av, const char *prefix,
+		 struct repository *repo UNUSED)
 {
 	struct option options[] = {
 		OPT__DRY_RUN(&show_only, N_("do not remove, show only")),
@@ -414,7 +415,8 @@ static int add_worktree(const char *path, const char *refname,
 			const struct add_opts *opts)
 {
 	struct strbuf sb_git = STRBUF_INIT, sb_repo = STRBUF_INIT;
-	struct strbuf sb = STRBUF_INIT, realpath = STRBUF_INIT;
+	struct strbuf sb = STRBUF_INIT, sb_tmp = STRBUF_INIT;
+	struct strbuf sb_path_realpath = STRBUF_INIT, sb_repo_realpath = STRBUF_INIT;
 	const char *name;
 	struct strvec child_env = STRVEC_INIT;
 	unsigned int counter = 0;
@@ -490,11 +492,10 @@ static int add_worktree(const char *path, const char *refname,
 
 	strbuf_reset(&sb);
 	strbuf_addf(&sb, "%s/gitdir", sb_repo.buf);
-	strbuf_realpath(&realpath, sb_git.buf, 1);
-	write_file(sb.buf, "%s", realpath.buf);
-	strbuf_realpath(&realpath, repo_get_common_dir(the_repository), 1);
-	write_file(sb_git.buf, "gitdir: %s/worktrees/%s",
-		   realpath.buf, name);
+	strbuf_realpath(&sb_path_realpath, path, 1);
+	strbuf_realpath(&sb_repo_realpath, sb_repo.buf, 1);
+	write_file(sb.buf, "%s/.git", relative_path(sb_path_realpath.buf, sb_repo_realpath.buf, &sb_tmp));
+	write_file(sb_git.buf, "gitdir: %s", relative_path(sb_repo_realpath.buf, sb_path_realpath.buf, &sb_tmp));
 	strbuf_reset(&sb);
 	strbuf_addf(&sb, "%s/commondir", sb_repo.buf);
 	write_file(sb.buf, "../..");
@@ -578,11 +579,13 @@ done:
 
 	strvec_clear(&child_env);
 	strbuf_release(&sb);
+	strbuf_release(&sb_tmp);
 	strbuf_release(&symref);
 	strbuf_release(&sb_repo);
+	strbuf_release(&sb_repo_realpath);
 	strbuf_release(&sb_git);
+	strbuf_release(&sb_path_realpath);
 	strbuf_release(&sb_name);
-	strbuf_release(&realpath);
 	free_worktree(wt);
 	return ret;
 }
@@ -761,7 +764,8 @@ static char *dwim_branch(const char *path, char **new_branch)
 	return NULL;
 }
 
-static int add(int ac, const char **av, const char *prefix)
+static int add(int ac, const char **av, const char *prefix,
+	       struct repository *repo UNUSED)
 {
 	struct add_opts opts;
 	const char *new_branch_force = NULL;
@@ -1037,7 +1041,8 @@ static void pathsort(struct worktree **wt)
 	QSORT(wt, n, pathcmp);
 }
 
-static int list(int ac, const char **av, const char *prefix)
+static int list(int ac, const char **av, const char *prefix,
+		struct repository *repo UNUSED)
 {
 	int porcelain = 0;
 	int line_terminator = '\n';
@@ -1082,7 +1087,8 @@ static int list(int ac, const char **av, const char *prefix)
 	return 0;
 }
 
-static int lock_worktree(int ac, const char **av, const char *prefix)
+static int lock_worktree(int ac, const char **av, const char *prefix,
+			 struct repository *repo UNUSED)
 {
 	const char *reason = "", *old_reason;
 	struct option options[] = {
@@ -1117,7 +1123,8 @@ static int lock_worktree(int ac, const char **av, const char *prefix)
 	return 0;
 }
 
-static int unlock_worktree(int ac, const char **av, const char *prefix)
+static int unlock_worktree(int ac, const char **av, const char *prefix,
+			   struct repository *repo UNUSED)
 {
 	struct option options[] = {
 		OPT_END()
@@ -1180,7 +1187,8 @@ static void validate_no_submodules(const struct worktree *wt)
 		die(_("working trees containing submodules cannot be moved or removed"));
 }
 
-static int move_worktree(int ac, const char **av, const char *prefix)
+static int move_worktree(int ac, const char **av, const char *prefix,
+			 struct repository *repo UNUSED)
 {
 	int force = 0;
 	struct option options[] = {
@@ -1310,7 +1318,8 @@ static int delete_git_work_tree(struct worktree *wt)
 	return ret;
 }
 
-static int remove_worktree(int ac, const char **av, const char *prefix)
+static int remove_worktree(int ac, const char **av, const char *prefix,
+			   struct repository *repo UNUSED)
 {
 	int force = 0;
 	struct option options[] = {
@@ -1375,7 +1384,8 @@ static void report_repair(int iserr, const char *path, const char *msg, void *cb
 	}
 }
 
-static int repair(int ac, const char **av, const char *prefix)
+static int repair(int ac, const char **av, const char *prefix,
+		  struct repository *repo UNUSED)
 {
 	const char **p;
 	const char *self[] = { ".", NULL };
@@ -1395,7 +1405,7 @@ static int repair(int ac, const char **av, const char *prefix)
 int cmd_worktree(int ac,
 		 const char **av,
 		 const char *prefix,
-		 struct repository *repo UNUSED)
+		 struct repository *repo)
 {
 	parse_opt_subcommand_fn *fn = NULL;
 	struct option options[] = {
@@ -1420,5 +1430,5 @@ int cmd_worktree(int ac,
 	prepare_repo_settings(the_repository);
 	the_repository->settings.command_requires_full_index = 0;
 
-	return fn(ac, av, prefix);
+	return fn(ac, av, prefix, repo);
 }

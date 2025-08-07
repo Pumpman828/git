@@ -2,7 +2,6 @@
 
 test_description='Test ref-filter and pretty APIs for commit and tag messages using CRLF'
 
-TEST_PASSES_SANITIZE_LEAK=true
 . ./test-lib.sh
 
 LIB_CRLF_BRANCHES=""
@@ -82,7 +81,7 @@ test_crlf_subject_body_and_contents() {
 
 
 test_expect_success 'Setup refs with commit and tag messages using CRLF' '
-	test_commit inital &&
+	test_commit initial &&
 	create_crlf_refs
 '
 

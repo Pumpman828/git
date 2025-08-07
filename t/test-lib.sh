@@ -577,53 +577,6 @@ case $GIT_TEST_FSYNC in
 	;;
 esac
 
-# Add libc MALLOC and MALLOC_PERTURB test only if we are not executing
-# the test with valgrind and have not compiled with conflict SANITIZE
-# options.
-if test -n "$valgrind" ||
-   test -n "$SANITIZE_ADDRESS" ||
-   test -n "$SANITIZE_LEAK" ||
-   test -n "$TEST_NO_MALLOC_CHECK"
-then
-	setup_malloc_check () {
-		: nothing
-	}
-	teardown_malloc_check () {
-		: nothing
-	}
-else
-	_USE_GLIBC_TUNABLES=
-	if _GLIBC_VERSION=$(getconf GNU_LIBC_VERSION 2>/dev/null) &&
-	   _GLIBC_VERSION=${_GLIBC_VERSION#"glibc "} &&
-	   expr 2.34 \<= "$_GLIBC_VERSION" >/dev/null
-	then
-		_USE_GLIBC_TUNABLES=YesPlease
-	fi
-	setup_malloc_check () {
-		local g
-		local t
-		MALLOC_CHECK_=3	MALLOC_PERTURB_=165
-		export MALLOC_CHECK_ MALLOC_PERTURB_
-		if test -n "$_USE_GLIBC_TUNABLES"
-		then
-			g=
-			LD_PRELOAD="libc_malloc_debug.so.0"
-			for t in \
-				glibc.malloc.check=1 \
-				glibc.malloc.perturb=165
-			do
-				g="${g#:}:$t"
-			done
-			GLIBC_TUNABLES=$g
-			export LD_PRELOAD GLIBC_TUNABLES
-		fi
-	}
-	teardown_malloc_check () {
-		unset MALLOC_CHECK_ MALLOC_PERTURB_
-		unset LD_PRELOAD GLIBC_TUNABLES
-	}
-fi
-
 # Protect ourselves from common misconfiguration to export
 # CDPATH into the environment
 unset CDPATH
@@ -1227,23 +1180,7 @@ check_test_results_san_file_ () {
 	fi &&
 	say_color error "$(cat "$TEST_RESULTS_SAN_FILE".*)" &&
 
-	if test -n "$passes_sanitize_leak" && test "$test_failure" = 0
-	then
-		say "As TEST_PASSES_SANITIZE_LEAK=true and our logs show we're leaking, exit non-zero!" &&
-		invert_exit_code=t
-	elif test -n "$passes_sanitize_leak"
-	then
-		say "As TEST_PASSES_SANITIZE_LEAK=true and our logs show we're leaking, and we're failing for other reasons too..." &&
-		invert_exit_code=
-	elif test -n "$sanitize_leak_check" && test "$test_failure" = 0
-	then
-		say "As TEST_PASSES_SANITIZE_LEAK=true isn't set the above leak is 'ok' with GIT_TEST_PASSING_SANITIZE_LEAK=check" &&
-		invert_exit_code=
-	elif test -n "$sanitize_leak_check"
-	then
-		say "As TEST_PASSES_SANITIZE_LEAK=true isn't set the above leak is 'ok' with GIT_TEST_PASSING_SANITIZE_LEAK=check" &&
-		invert_exit_code=t
-	elif test "$test_failure" = 0
+	if test "$test_failure" = 0
 	then
 		say "Our logs revealed a memory leak, exit non-zero!" &&
 		invert_exit_code=t
@@ -1272,11 +1209,6 @@ test_done () {
 		missing_prereq $test_missing_prereq
 
 		EOF
-	fi
-
-	if test -z "$passes_sanitize_leak" && test_bool_env TEST_PASSES_SANITIZE_LEAK false
-	then
-		BAIL_OUT "Please, set TEST_PASSES_SANITIZE_LEAK before sourcing test-lib.sh"
 	fi
 
 	if test "$test_fixed" != 0
@@ -1483,6 +1415,56 @@ GIT_ATTR_NOSYSTEM=1
 GIT_CEILING_DIRECTORIES="$TRASH_DIRECTORY/.."
 export PATH GIT_EXEC_PATH GIT_TEMPLATE_DIR GIT_CONFIG_NOSYSTEM GIT_ATTR_NOSYSTEM GIT_CEILING_DIRECTORIES
 
+# Add libc MALLOC and MALLOC_PERTURB test only if we are not executing
+# the test with valgrind and have not compiled with conflict SANITIZE
+# options.
+if test -n "$valgrind" ||
+   test -n "$SANITIZE_ADDRESS" ||
+   test -n "$SANITIZE_LEAK" ||
+   test -n "$TEST_NO_MALLOC_CHECK"
+then
+	setup_malloc_check () {
+		: nothing
+	}
+	teardown_malloc_check () {
+		: nothing
+	}
+else
+	_USE_GLIBC_TUNABLES=
+	_USE_GLIBC_PRELOAD=libc_malloc_debug.so.0
+	if _GLIBC_VERSION=$(getconf GNU_LIBC_VERSION 2>/dev/null) &&
+	   _GLIBC_VERSION=${_GLIBC_VERSION#"glibc "} &&
+	   expr 2.34 \<= "$_GLIBC_VERSION" >/dev/null &&
+	   stderr=$(LD_PRELOAD=$_USE_GLIBC_PRELOAD git version 2>&1 >/dev/null) &&
+	   test -z "$stderr"
+	then
+		_USE_GLIBC_TUNABLES=YesPlease
+	fi
+	setup_malloc_check () {
+		local g
+		local t
+		MALLOC_CHECK_=3	MALLOC_PERTURB_=165
+		export MALLOC_CHECK_ MALLOC_PERTURB_
+		if test -n "$_USE_GLIBC_TUNABLES"
+		then
+			g=
+			LD_PRELOAD=$_USE_GLIBC_PRELOAD
+			for t in \
+				glibc.malloc.check=1 \
+				glibc.malloc.perturb=165
+			do
+				g="${g#:}:$t"
+			done
+			GLIBC_TUNABLES=$g
+			export LD_PRELOAD GLIBC_TUNABLES
+		fi
+	}
+	teardown_malloc_check () {
+		unset MALLOC_CHECK_ MALLOC_PERTURB_
+		unset LD_PRELOAD GLIBC_TUNABLES
+	}
+fi
+
 if test -z "$GIT_TEST_CMP"
 then
 	if test -n "$GIT_TEST_CMP_USE_COPIED_CONTEXT"
@@ -1515,51 +1497,8 @@ then
 	test_done
 fi
 
-BAIL_OUT_ENV_NEEDS_SANITIZE_LEAK () {
-	BAIL_OUT "$1 has no effect except when compiled with SANITIZE=leak"
-}
-
 if test -n "$SANITIZE_LEAK"
 then
-	# Normalize with test_bool_env
-	passes_sanitize_leak=
-
-	# We need to see TEST_PASSES_SANITIZE_LEAK in "test-tool
-	# env-helper" (via test_bool_env)
-	export TEST_PASSES_SANITIZE_LEAK
-	if test_bool_env TEST_PASSES_SANITIZE_LEAK false
-	then
-		passes_sanitize_leak=t
-	fi
-
-	if test "$GIT_TEST_PASSING_SANITIZE_LEAK" = "check" ||
-	   test "$GIT_TEST_PASSING_SANITIZE_LEAK" = "check-failing"
-	then
-		if test "$GIT_TEST_PASSING_SANITIZE_LEAK" = "check-failing" &&
-		   test -n "$passes_sanitize_leak"
-		then
-			skip_all="skipping leak-free $this_test under GIT_TEST_PASSING_SANITIZE_LEAK=check-failing"
-			test_done
-		fi
-
-		sanitize_leak_check=t
-		if test -n "$invert_exit_code"
-		then
-			BAIL_OUT "cannot use --invert-exit-code under GIT_TEST_PASSING_SANITIZE_LEAK=check"
-		fi
-
-		if test -z "$passes_sanitize_leak"
-		then
-			say "in GIT_TEST_PASSING_SANITIZE_LEAK=check mode, setting --invert-exit-code for TEST_PASSES_SANITIZE_LEAK != true"
-			invert_exit_code=t
-		fi
-	elif test -z "$passes_sanitize_leak" &&
-	     test_bool_env GIT_TEST_PASSING_SANITIZE_LEAK false
-	then
-		skip_all="skipping $this_test under GIT_TEST_PASSING_SANITIZE_LEAK=true"
-		test_done
-	fi
-
 	rm -rf "$TEST_RESULTS_SAN_DIR"
 	if ! mkdir -p "$TEST_RESULTS_SAN_DIR"
 	then
@@ -1572,14 +1511,8 @@ then
 
 	prepend_var LSAN_OPTIONS : dedup_token_length=9999
 	prepend_var LSAN_OPTIONS : log_exe_name=1
-	prepend_var LSAN_OPTIONS : log_path=\"$TEST_RESULTS_SAN_FILE\"
+	prepend_var LSAN_OPTIONS : log_path="'$TEST_RESULTS_SAN_FILE'"
 	export LSAN_OPTIONS
-
-elif test "$GIT_TEST_PASSING_SANITIZE_LEAK" = "check" ||
-     test "$GIT_TEST_PASSING_SANITIZE_LEAK" = "check-failing" ||
-     test_bool_env GIT_TEST_PASSING_SANITIZE_LEAK false
-then
-	BAIL_OUT_ENV_NEEDS_SANITIZE_LEAK "GIT_TEST_PASSING_SANITIZE_LEAK=true"
 fi
 
 if test "${GIT_TEST_CHAIN_LINT:-1}" != 0 &&
@@ -1743,6 +1676,7 @@ esac
 
 ( COLUMNS=1 && test $COLUMNS = 1 ) && test_set_prereq COLUMNS_CAN_BE_1
 test -z "$NO_CURL" && test_set_prereq LIBCURL
+test -z "$NO_ICONV" && test_set_prereq ICONV
 test -z "$NO_PERL" && test_set_prereq PERL
 test -z "$NO_PTHREADS" && test_set_prereq PTHREADS
 test -z "$NO_PYTHON" && test_set_prereq PYTHON

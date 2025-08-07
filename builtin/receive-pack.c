@@ -374,6 +374,7 @@ static void write_head_info(void)
 struct command {
 	struct command *next;
 	const char *error_string;
+	char *error_string_owned;
 	struct ref_push_report *report;
 	unsigned int skip_update:1,
 		     did_not_exist:1,
@@ -1083,7 +1084,7 @@ static int read_proc_receive_report(struct packet_reader *reader,
 		hint->run_proc_receive |= RUN_PROC_RECEIVE_RETURNED;
 		if (!strcmp(head, "ng")) {
 			if (p)
-				hint->error_string = xstrdup(p);
+				hint->error_string = hint->error_string_owned = xstrdup(p);
 			else
 				hint->error_string = "failed";
 			code = -1;
@@ -1848,7 +1849,7 @@ static void execute_commands_non_atomic(struct command *commands,
 			continue;
 
 		transaction = ref_store_transaction_begin(get_main_ref_store(the_repository),
-							  &err);
+							  0, &err);
 		if (!transaction) {
 			rp_error("%s", err.buf);
 			strbuf_reset(&err);
@@ -1877,7 +1878,7 @@ static void execute_commands_atomic(struct command *commands,
 	const char *reported_error = "atomic push failure";
 
 	transaction = ref_store_transaction_begin(get_main_ref_store(the_repository),
-						  &err);
+						  0, &err);
 	if (!transaction) {
 		rp_error("%s", err.buf);
 		strbuf_reset(&err);
@@ -2054,6 +2055,8 @@ static void free_commands(struct command *commands)
 	while (commands) {
 		struct command *next = commands->next;
 
+		ref_push_report_free(commands->report);
+		free(commands->error_string_owned);
 		free(commands);
 		commands = next;
 	}

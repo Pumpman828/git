@@ -454,14 +454,10 @@ static void filter_prefetch_refspec(struct refspec *rs)
 				 ref_namespace[NAMESPACE_TAGS].ref))) {
 			int j;
 
-			free(rs->items[i].src);
-			free(rs->items[i].dst);
-			free(rs->raw[i]);
+			refspec_item_clear(&rs->items[i]);
 
-			for (j = i + 1; j < rs->nr; j++) {
+			for (j = i + 1; j < rs->nr; j++)
 				rs->items[j - 1] = rs->items[j];
-				rs->raw[j - 1] = rs->raw[j];
-			}
 			rs->nr--;
 			i--;
 			continue;
@@ -669,7 +665,7 @@ static int s_update_ref(const char *action,
 	 */
 	if (!transaction) {
 		transaction = our_transaction = ref_store_transaction_begin(get_main_ref_store(the_repository),
-									    &err);
+									    0, &err);
 		if (!transaction) {
 			ret = STORE_REF_ERROR_OTHER;
 			goto out;
@@ -1671,7 +1667,7 @@ static int do_fetch(struct transport *transport,
 
 	if (atomic_fetch) {
 		transaction = ref_store_transaction_begin(get_main_ref_store(the_repository),
-							  &err);
+							  0, &err);
 		if (!transaction) {
 			retcode = -1;
 			goto cleanup;
@@ -1981,6 +1977,8 @@ static int fetch_multiple(struct string_list *list, int max_children,
 	strvec_pushl(&argv, "-c", "fetch.bundleURI=",
 		     "fetch", "--append", "--no-auto-gc",
 		     "--no-write-commit-graph", NULL);
+	for (i = 0; i < server_options.nr; i++)
+		strvec_pushf(&argv, "--server-option=%s", server_options.items[i].string);
 	add_options_to_argv(&argv, config);
 
 	if (max_children != 1 && list->nr != 1) {
@@ -2214,8 +2212,8 @@ int cmd_fetch(int argc,
 			   N_("deepen history of shallow clone")),
 		OPT_STRING(0, "shallow-since", &deepen_since, N_("time"),
 			   N_("deepen history of shallow repository based on time")),
-		OPT_STRING_LIST(0, "shallow-exclude", &deepen_not, N_("revision"),
-				N_("deepen history of shallow clone, excluding rev")),
+		OPT_STRING_LIST(0, "shallow-exclude", &deepen_not, N_("ref"),
+				N_("deepen history of shallow clone, excluding ref")),
 		OPT_INTEGER(0, "deepen", &deepen_relative,
 			    N_("deepen history of shallow clone")),
 		OPT_SET_INT_F(0, "unshallow", &unshallow,

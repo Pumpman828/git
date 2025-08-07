@@ -662,7 +662,7 @@ static int fast_forward_to(struct repository *r,
 	strbuf_addf(&sb, "%s: fast-forward", action_name(opts));
 
 	transaction = ref_store_transaction_begin(get_main_ref_store(the_repository),
-						  &err);
+						  0, &err);
 	if (!transaction ||
 	    ref_transaction_update(transaction, "HEAD",
 				   to, unborn && !is_rebase_i(opts) ?
@@ -1297,7 +1297,7 @@ int update_head_with_reflog(const struct commit *old_head,
 	}
 
 	transaction = ref_store_transaction_begin(get_main_ref_store(the_repository),
-						  err);
+						  0, err);
 	if (!transaction ||
 	    ref_transaction_update(transaction, "HEAD", new_head,
 				   old_head ? &old_head->object.oid : null_oid(),
@@ -1941,10 +1941,10 @@ static int seen_squash(struct replay_ctx *ctx)
 
 static void update_comment_bufs(struct strbuf *buf1, struct strbuf *buf2, int n)
 {
-	strbuf_setlen(buf1, 2);
+	strbuf_setlen(buf1, strlen(comment_line_str) + 1);
 	strbuf_addf(buf1, _(nth_commit_msg_fmt), n);
 	strbuf_addch(buf1, '\n');
-	strbuf_setlen(buf2, 2);
+	strbuf_setlen(buf2, strlen(comment_line_str) + 1);
 	strbuf_addf(buf2, _(skip_nth_commit_msg_fmt), n);
 	strbuf_addch(buf2, '\n');
 }
@@ -1963,8 +1963,12 @@ static void update_squash_message_for_fixup(struct strbuf *msg)
 	size_t orig_msg_len;
 	int i = 1;
 
-	strbuf_addf(&buf1, "# %s\n", _(first_commit_msg_str));
-	strbuf_addf(&buf2, "# %s\n", _(skip_first_commit_msg_str));
+	strbuf_add_commented_lines(&buf1, _(first_commit_msg_str),
+				   strlen(_(first_commit_msg_str)),
+				   comment_line_str);
+	strbuf_add_commented_lines(&buf2, _(skip_first_commit_msg_str),
+				   strlen(_(skip_first_commit_msg_str)),
+				   comment_line_str);
 	s = start = orig_msg = strbuf_detach(msg, &orig_msg_len);
 	while (s) {
 		const char *next;
@@ -2341,8 +2345,8 @@ static int do_pick_commit(struct repository *r,
 		next = parent;
 		next_label = msg.parent_label;
 		if (opts->commit_use_reference) {
-			strbuf_addstr(&ctx->message,
-				"# *** SAY WHY WE ARE REVERTING ON THE TITLE LINE ***");
+			strbuf_commented_addf(&ctx->message, comment_line_str,
+				"*** SAY WHY WE ARE REVERTING ON THE TITLE LINE ***");
 		} else if (skip_prefix(msg.subject, "Revert \"", &orig_subject) &&
 			   /*
 			    * We don't touch pre-existing repeated reverts, because
@@ -2352,12 +2356,13 @@ static int do_pick_commit(struct repository *r,
 			   !starts_with(orig_subject, "Revert \"")) {
 			strbuf_addstr(&ctx->message, "Reapply \"");
 			strbuf_addstr(&ctx->message, orig_subject);
+			strbuf_addstr(&ctx->message, "\n");
 		} else {
 			strbuf_addstr(&ctx->message, "Revert \"");
 			strbuf_addstr(&ctx->message, msg.subject);
-			strbuf_addstr(&ctx->message, "\"");
+			strbuf_addstr(&ctx->message, "\"\n");
 		}
-		strbuf_addstr(&ctx->message, "\n\nThis reverts commit ");
+		strbuf_addstr(&ctx->message, "\nThis reverts commit ");
 		refer_to_commit(opts, &ctx->message, commit);
 
 		if (commit->parents && commit->parents->next) {
@@ -3890,7 +3895,7 @@ static int do_label(struct repository *r, const char *name, int len)
 	strbuf_addf(&ref_name, "refs/rewritten/%.*s", len, name);
 	strbuf_addf(&msg, "rebase (label) '%.*s'", len, name);
 
-	transaction = ref_store_transaction_begin(refs, &err);
+	transaction = ref_store_transaction_begin(refs, 0, &err);
 	if (!transaction) {
 		error("%s", err.buf);
 		ret = -1;
@@ -5819,7 +5824,7 @@ static int make_script_with_merges(struct pretty_print_context *pp,
 	int root_with_onto = flags & TODO_LIST_ROOT_WITH_ONTO;
 	int skipped_commit = 0;
 	struct strbuf buf = STRBUF_INIT, oneline = STRBUF_INIT;
-	struct strbuf label = STRBUF_INIT;
+	struct strbuf label_from_message = STRBUF_INIT;
 	struct commit_list *commits = NULL, **tail = &commits, *iter;
 	struct commit_list *tips = NULL, **tips_tail = &tips;
 	struct commit *commit;
@@ -5842,6 +5847,7 @@ static int make_script_with_merges(struct pretty_print_context *pp,
 	oidmap_init(&state.commit2label, 0);
 	hashmap_init(&state.labels, labels_cmp, NULL, 0);
 	strbuf_init(&state.buf, 32);
+	load_branch_decorations();
 
 	if (revs->cmdline.nr && (revs->cmdline.rev[0].flags & BOTTOM)) {
 		struct labels_entry *onto_label_entry;
@@ -5902,18 +5908,18 @@ static int make_script_with_merges(struct pretty_print_context *pp,
 			continue;
 		}
 
-		/* Create a label */
-		strbuf_reset(&label);
+		/* Create a label from the commit message */
+		strbuf_reset(&label_from_message);
 		if (skip_prefix(oneline.buf, "Merge ", &p1) &&
 		    (p1 = strchr(p1, '\'')) &&
 		    (p2 = strchr(++p1, '\'')))
-			strbuf_add(&label, p1, p2 - p1);
+			strbuf_add(&label_from_message, p1, p2 - p1);
 		else if (skip_prefix(oneline.buf, "Merge pull request ",
 				     &p1) &&
 			 (p1 = strstr(p1, " from ")))
-			strbuf_addstr(&label, p1 + strlen(" from "));
+			strbuf_addstr(&label_from_message, p1 + strlen(" from "));
 		else
-			strbuf_addbuf(&label, &oneline);
+			strbuf_addbuf(&label_from_message, &oneline);
 
 		strbuf_reset(&buf);
 		strbuf_addf(&buf, "%s -C %s",
@@ -5921,6 +5927,14 @@ static int make_script_with_merges(struct pretty_print_context *pp,
 
 		/* label the tips of merged branches */
 		for (; to_merge; to_merge = to_merge->next) {
+			const char *label = label_from_message.buf;
+			const struct name_decoration *decoration =
+				get_name_decoration(&to_merge->item->object);
+
+			if (decoration)
+				skip_prefix(decoration->name, "refs/heads/",
+					    &label);
+
 			oid = &to_merge->item->object.oid;
 			strbuf_addch(&buf, ' ');
 
@@ -5933,7 +5947,7 @@ static int make_script_with_merges(struct pretty_print_context *pp,
 			tips_tail = &commit_list_insert(to_merge->item,
 							tips_tail)->next;
 
-			strbuf_addstr(&buf, label_oid(oid, label.buf, &state));
+			strbuf_addstr(&buf, label_oid(oid, label, &state));
 		}
 		strbuf_addf(&buf, " # %s", oneline.buf);
 
@@ -6041,7 +6055,7 @@ static int make_script_with_merges(struct pretty_print_context *pp,
 	free_commit_list(commits);
 	free_commit_list(tips);
 
-	strbuf_release(&label);
+	strbuf_release(&label_from_message);
 	strbuf_release(&oneline);
 	strbuf_release(&buf);
 
@@ -6373,8 +6387,9 @@ static int add_decorations_to_list(const struct commit *commit,
 		/* If the branch is checked out, then leave a comment instead. */
 		if ((path = branch_checked_out(decoration->name))) {
 			item->command = TODO_COMMENT;
-			strbuf_addf(ctx->buf, "# Ref %s checked out at '%s'\n",
-				    decoration->name, path);
+			strbuf_commented_addf(ctx->buf, comment_line_str,
+					      "Ref %s checked out at '%s'\n",
+					      decoration->name, path);
 		} else {
 			struct string_list_item *sti;
 			item->command = TODO_UPDATE_REF;
@@ -6403,14 +6418,6 @@ static int add_decorations_to_list(const struct commit *commit,
 static int todo_list_add_update_ref_commands(struct todo_list *todo_list)
 {
 	int i, res;
-	static struct string_list decorate_refs_exclude = STRING_LIST_INIT_NODUP;
-	static struct string_list decorate_refs_exclude_config = STRING_LIST_INIT_NODUP;
-	static struct string_list decorate_refs_include = STRING_LIST_INIT_NODUP;
-	struct decoration_filter decoration_filter = {
-		.include_ref_pattern = &decorate_refs_include,
-		.exclude_ref_pattern = &decorate_refs_exclude,
-		.exclude_ref_config_pattern = &decorate_refs_exclude_config,
-	};
 	struct todo_add_branch_context ctx = {
 		.buf = &todo_list->buf,
 		.refs_to_oids = STRING_LIST_INIT_DUP,
@@ -6419,8 +6426,7 @@ static int todo_list_add_update_ref_commands(struct todo_list *todo_list)
 	ctx.items_alloc = 2 * todo_list->nr + 1;
 	ALLOC_ARRAY(ctx.items, ctx.items_alloc);
 
-	string_list_append(&decorate_refs_include, "refs/heads/");
-	load_ref_decorations(&decoration_filter, 0);
+	load_branch_decorations();
 
 	for (i = 0; i < todo_list->nr; ) {
 		struct todo_item *item = &todo_list->items[i];

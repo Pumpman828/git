@@ -232,6 +232,11 @@ void load_ref_decorations(struct decoration_filter *filter, int flags)
 			for_each_string_list_item(item, filter->exclude_ref_config_pattern) {
 				normalize_glob_ref(item, NULL, item->string);
 			}
+
+			/* normalize_glob_ref duplicates the strings */
+			filter->exclude_ref_pattern->strdup_strings = 1;
+			filter->include_ref_pattern->strdup_strings = 1;
+			filter->exclude_ref_config_pattern->strdup_strings = 1;
 		}
 		decoration_loaded = 1;
 		decoration_flags = flags;
@@ -240,6 +245,27 @@ void load_ref_decorations(struct decoration_filter *filter, int flags)
 		refs_head_ref(get_main_ref_store(the_repository),
 			      add_ref_decoration, filter);
 		for_each_commit_graft(add_graft_decoration, filter);
+	}
+}
+
+void load_branch_decorations(void)
+{
+	if (!decoration_loaded) {
+		struct string_list decorate_refs_exclude = STRING_LIST_INIT_NODUP;
+		struct string_list decorate_refs_exclude_config = STRING_LIST_INIT_NODUP;
+		struct string_list decorate_refs_include = STRING_LIST_INIT_NODUP;
+		struct decoration_filter decoration_filter = {
+			.include_ref_pattern = &decorate_refs_include,
+			.exclude_ref_pattern = &decorate_refs_exclude,
+			.exclude_ref_config_pattern = &decorate_refs_exclude_config,
+		};
+
+		string_list_append(&decorate_refs_include, "refs/heads/");
+		load_ref_decorations(&decoration_filter, 0);
+
+		string_list_clear(&decorate_refs_exclude, 0);
+		string_list_clear(&decorate_refs_exclude_config, 0);
+		string_list_clear(&decorate_refs_include, 0);
 	}
 }
 
@@ -675,7 +701,7 @@ static void show_diff_of_diff(struct rev_info *opt)
 		struct diff_queue_struct dq;
 
 		memcpy(&dq, &diff_queued_diff, sizeof(diff_queued_diff));
-		DIFF_QUEUE_CLEAR(&diff_queued_diff);
+		diff_queue_init(&diff_queued_diff);
 
 		fprintf_ln(opt->diffopt.file, "\n%s", opt->idiff_title);
 		show_interdiff(opt->idiff_oid1, opt->idiff_oid2, 2,
@@ -694,7 +720,7 @@ static void show_diff_of_diff(struct rev_info *opt)
 		};
 
 		memcpy(&dq, &diff_queued_diff, sizeof(diff_queued_diff));
-		DIFF_QUEUE_CLEAR(&diff_queued_diff);
+		diff_queue_init(&diff_queued_diff);
 
 		fprintf_ln(opt->diffopt.file, "\n%s", opt->rdiff_title);
 		/*

@@ -37,8 +37,8 @@ struct reftable_reader {
 	/* Size of the file, excluding the footer. */
 	uint64_t size;
 
-	/* 'sha1' for SHA1, 's256' for SHA-256 */
-	uint32_t hash_id;
+	/* The hash function used for ref records. */
+	enum reftable_hash hash_id;
 
 	uint32_t block_size;
 	uint64_t min_update_index;
@@ -56,9 +56,9 @@ struct reftable_reader {
 
 const char *reader_name(struct reftable_reader *r);
 
-void reader_init_iter(struct reftable_reader *r,
-		      struct reftable_iterator *it,
-		      uint8_t typ);
+int reader_init_iter(struct reftable_reader *r,
+		     struct reftable_iterator *it,
+		     uint8_t typ);
 
 /* initialize a block reader to read from `r` */
 int reader_init_block_reader(struct reftable_reader *r, struct block_reader *br,

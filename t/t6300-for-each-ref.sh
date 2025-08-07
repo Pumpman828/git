@@ -5,7 +5,6 @@
 
 test_description='for-each-ref test'
 
-TEST_PASSES_SANITIZE_LEAK=true
 . ./test-lib.sh
 GNUPGHOME_NOT_USED=$GNUPGHOME
 . "$TEST_DIRECTORY"/lib-gpg.sh
@@ -770,7 +769,7 @@ test_expect_success 'describe:abbrev=... vs describe --abbrev=...' '
 			refs/heads/master >actual &&
 		test_cmp expect actual &&
 
-		# Make sure the hash used is atleast 14 digits long
+		# Make sure the hash used is at least 14 digits long
 		sed -e "s/^.*-g\([0-9a-f]*\)$/\1/" <actual >hexpart &&
 		test 15 -le $(wc -c <hexpart) &&
 

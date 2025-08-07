@@ -164,7 +164,7 @@ static int do_sign(struct strbuf *buffer, struct object_id **compat_oid,
 	int ret = -1;
 
 	if (sign_buffer(buffer, &sig, keyid))
-		return -1;
+		goto out;
 
 	if (compat) {
 		const struct git_hash_algo *algo = the_repository->hash_algo;
@@ -681,7 +681,7 @@ int cmd_tag(int argc,
 	}
 
 	transaction = ref_store_transaction_begin(get_main_ref_store(the_repository),
-						  &err);
+						  0, &err);
 	if (!transaction ||
 	    ref_transaction_update(transaction, ref.buf, &object, &prev,
 				   NULL, NULL,

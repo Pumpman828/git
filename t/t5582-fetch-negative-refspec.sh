@@ -8,7 +8,6 @@ test_description='"git fetch" with negative refspecs.
 GIT_TEST_DEFAULT_INITIAL_BRANCH_NAME=main
 export GIT_TEST_DEFAULT_INITIAL_BRANCH_NAME
 
-TEST_PASSES_SANITIZE_LEAK=true
 . ./test-lib.sh
 
 test_expect_success setup '
@@ -281,6 +280,10 @@ test_expect_success '--prefetch succeeds when refspec becomes empty' '
 	git -C one config remote.origin.tagopt "--no-tags" &&
 
 	git -C one fetch --prefetch
+'
+
+test_expect_success '--prefetch succeeds with empty command line refspec' '
+	git -C one fetch --prefetch origin +refs/tags/extra
 '
 
 test_done

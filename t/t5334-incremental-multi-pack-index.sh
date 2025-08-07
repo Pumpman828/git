@@ -1,6 +1,7 @@
 #!/bin/sh
 
 test_description='incremental multi-pack-index'
+
 . ./test-lib.sh
 . "$TEST_DIRECTORY"/lib-midx.sh
 

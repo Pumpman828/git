@@ -7,7 +7,6 @@ test_description='test git fast-import utility'
 GIT_TEST_DEFAULT_INITIAL_BRANCH_NAME=main
 export GIT_TEST_DEFAULT_INITIAL_BRANCH_NAME
 
-TEST_PASSES_SANITIZE_LEAK=true
 . ./test-lib.sh
 . "$TEST_DIRECTORY"/lib-diff.sh ;# test-lib chdir's into trash
 
@@ -3676,7 +3675,7 @@ test_expect_success !MINGW 'W: get-mark & empty orphan commit with erroneous thi
 ### series X (other new features)
 ###
 
-test_expect_success 'X: handling encoding' '
+test_expect_success ICONV 'X: handling encoding' '
 	test_tick &&
 	cat >input <<-INPUT_END &&
 	commit refs/heads/encoding
@@ -3690,6 +3689,34 @@ test_expect_success 'X: handling encoding' '
 	git fast-import <input &&
 	git cat-file -p encoding | grep $(printf "\360") &&
 	git log -1 --format=%B encoding | grep $(printf "\317\200")
+'
+
+test_expect_success 'X: replace ref that becomes useless is removed' '
+	git init -qb main testrepo &&
+	cd testrepo &&
+	(
+		test_commit test &&
+
+		test_commit msg somename content &&
+
+		git mv somename othername &&
+		NEW_TREE=$(git write-tree) &&
+		MSG="$(git log -1 --format=%B HEAD)" &&
+		NEW_COMMIT=$(git commit-tree -p HEAD^1 -m "$MSG" $NEW_TREE) &&
+		git replace main $NEW_COMMIT &&
+
+		echo more >>othername &&
+		git add othername &&
+		git commit -qm more &&
+
+		git fast-export --all >tmp &&
+		sed -e s/othername/somename/ tmp >tmp2 &&
+		git fast-import --force <tmp2 2>msgs &&
+
+		grep "Dropping.*since it would point to itself" msgs &&
+		git show-ref >refs &&
+		! grep refs/replace refs
+	)
 '
 
 ###

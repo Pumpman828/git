@@ -179,6 +179,7 @@ static unsigned long branch_load_count;
 static int failure;
 static FILE *pack_edges;
 static unsigned int show_stats = 1;
+static unsigned int quiet;
 static int global_argc;
 static const char **global_argv;
 static const char *global_prefix;
@@ -966,8 +967,7 @@ static int store_object(
 	if (e->idx.offset) {
 		duplicate_count_by_type[type]++;
 		return 1;
-	} else if (find_sha1_pack(oid.hash,
-				  get_all_packs(the_repository))) {
+	} else if (find_oid_pack(&oid, get_all_packs(the_repository))) {
 		e->type = type;
 		e->pack_id = MAX_PACK_ID;
 		e->idx.offset = 1; /* just not zero! */
@@ -1167,8 +1167,7 @@ static void stream_blob(uintmax_t len, struct object_id *oidout, uintmax_t mark)
 		duplicate_count_by_type[OBJ_BLOB]++;
 		truncate_pack(&checkpoint);
 
-	} else if (find_sha1_pack(oid.hash,
-				  get_all_packs(the_repository))) {
+	} else if (find_oid_pack(&oid, get_all_packs(the_repository))) {
 		e->type = OBJ_BLOB;
 		e->pack_id = MAX_PACK_ID;
 		e->idx.offset = 1; /* just not zero! */
@@ -1604,7 +1603,19 @@ static int update_branch(struct branch *b)
 	struct ref_transaction *transaction;
 	struct object_id old_oid;
 	struct strbuf err = STRBUF_INIT;
+	static const char *replace_prefix = "refs/replace/";
 
+	if (starts_with(b->name, replace_prefix) &&
+	    !strcmp(b->name + strlen(replace_prefix),
+		    oid_to_hex(&b->oid))) {
+		if (!quiet)
+			warning("Dropping %s since it would point to "
+				"itself (i.e. to %s)",
+				b->name, oid_to_hex(&b->oid));
+		refs_delete_ref(get_main_ref_store(the_repository),
+				NULL, b->name, NULL, 0);
+		return 0;
+	}
 	if (is_null_oid(&b->oid)) {
 		if (b->delete)
 			refs_delete_ref(get_main_ref_store(the_repository),
@@ -1636,7 +1647,7 @@ static int update_branch(struct branch *b)
 		}
 	}
 	transaction = ref_store_transaction_begin(get_main_ref_store(the_repository),
-						  &err);
+						  0, &err);
 	if (!transaction ||
 	    ref_transaction_update(transaction, b->name, &b->oid, &old_oid,
 				   NULL, NULL, 0, msg, &err) ||
@@ -1671,7 +1682,7 @@ static void dump_tags(void)
 	struct ref_transaction *transaction;
 
 	transaction = ref_store_transaction_begin(get_main_ref_store(the_repository),
-						  &err);
+						  0, &err);
 	if (!transaction) {
 		failure |= error("%s", err.buf);
 		goto cleanup;
@@ -3390,6 +3401,7 @@ static int parse_one_option(const char *option)
 		option_export_pack_edges(option);
 	} else if (!strcmp(option, "quiet")) {
 		show_stats = 0;
+		quiet = 1;
 	} else if (!strcmp(option, "stats")) {
 		show_stats = 1;
 	} else if (!strcmp(option, "allow-unsafe-features")) {

@@ -4,6 +4,7 @@
 #include "abspath.h"
 #include "config.h"
 #include "environment.h"
+#include "gettext.h"
 #include "path.h"
 #include "pkt-line.h"
 #include "protocol.h"
@@ -151,6 +152,7 @@ static const char *path_ok(const char *directory, struct hostinfo *hi)
 	size_t rlen;
 	const char *path;
 	const char *dir;
+	unsigned enter_repo_flags;
 
 	dir = directory;
 
@@ -241,14 +243,15 @@ static const char *path_ok(const char *directory, struct hostinfo *hi)
 		dir = rpath;
 	}
 
-	path = enter_repo(dir, strict_paths);
+	enter_repo_flags = strict_paths ? ENTER_REPO_STRICT : 0;
+	path = enter_repo(dir, enter_repo_flags);
 	if (!path && base_path && base_path_relaxed) {
 		/*
 		 * if we fail and base_path_relaxed is enabled, try without
 		 * prefixing the base path
 		 */
 		dir = directory;
-		path = enter_repo(dir, strict_paths);
+		path = enter_repo(dir, enter_repo_flags);
 	}
 
 	if (!path) {
@@ -1308,17 +1311,20 @@ int cmd_main(int argc, const char **argv)
 			continue;
 		}
 		if (skip_prefix(arg, "--timeout=", &v)) {
-			timeout = atoi(v);
+			if (strtoul_ui(v, 10, &timeout))
+				die(_("invalid timeout '%s', expecting a non-negative integer"), v);
 			continue;
 		}
 		if (skip_prefix(arg, "--init-timeout=", &v)) {
-			init_timeout = atoi(v);
+			if (strtoul_ui(v, 10, &init_timeout))
+				die(_("invalid init-timeout '%s', expecting a non-negative integer"), v);
 			continue;
 		}
 		if (skip_prefix(arg, "--max-connections=", &v)) {
-			max_connections = atoi(v);
+			if (strtol_i(v, 10, &max_connections))
+				die(_("invalid max-connections '%s', expecting an integer"), v);
 			if (max_connections < 0)
-				max_connections = 0;	        /* unlimited */
+				max_connections = 0;  /* unlimited */
 			continue;
 		}
 		if (!strcmp(arg, "--strict-paths")) {

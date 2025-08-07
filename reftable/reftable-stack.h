@@ -82,16 +82,16 @@ struct reftable_iterator;
  * be used to iterate through refs. The iterator is valid until the next reload
  * or write.
  */
-void reftable_stack_init_ref_iterator(struct reftable_stack *st,
-				      struct reftable_iterator *it);
+int reftable_stack_init_ref_iterator(struct reftable_stack *st,
+				     struct reftable_iterator *it);
 
 /*
  * Initialize an iterator for the merged tables contained in the stack that can
  * be used to iterate through logs. The iterator is valid until the next reload
  * or write.
  */
-void reftable_stack_init_log_iterator(struct reftable_stack *st,
-				      struct reftable_iterator *it);
+int reftable_stack_init_log_iterator(struct reftable_stack *st,
+				     struct reftable_iterator *it);
 
 /* returns the merged_table for seeking. This table is valid until the
  * next write or reload, and should not be closed or deleted.
@@ -148,5 +148,8 @@ struct reftable_compaction_stats {
 /* return statistics for compaction up till now. */
 struct reftable_compaction_stats *
 reftable_stack_compaction_stats(struct reftable_stack *st);
+
+/* Return the hash of the stack. */
+enum reftable_hash reftable_stack_hash_id(struct reftable_stack *st);
 
 #endif

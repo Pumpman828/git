@@ -2,8 +2,13 @@
 
 test_description='git am with corrupt input'
 
-TEST_PASSES_SANITIZE_LEAK=true
 . ./test-lib.sh
+
+if ! test_have_prereq ICONV
+then
+	skip_all='skipping am encoding corruption tests; iconv not available'
+	test_done
+fi
 
 make_mbox_with_nul () {
 	space=' '
